@@ -22,6 +22,24 @@ nah begitu, fitur nya masih ini
 - fitur jam, tanggal dan hari 
 - animasi lebih di permak
 - bisa connect WIFI
+- bisa nampilin musik yg lagi di setel di spotify 
+```bash
+- makesure ada akun spotify dan lastfm
+- dan makesure udah ada API KEY nya, kalo gada buat dulu di : https://www.last.fm/api/account/create
+- ke /text-to-oled
+- buat file secret.h
+- isinya begini 
+```
+```cpp
+#pragma once
+
+static const char* LASTFM_USER = "[last-fm-username]";
+static const char* LASTFM_API_KEY = "[last-fm-API]";
+```
+```bash
+- done tinggal lanjut aja build upload firmware nya
+```
+- bisa nampilin cuaca
 
 
 ## Hardware
