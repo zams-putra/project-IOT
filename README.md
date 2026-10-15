@@ -10,6 +10,7 @@ This project is built from scratch using C++ and the Arduino framework with Plat
 
 
 ![IOT 1](/img/iot1.jpg)
+![IOT 1](/img/iot1.2.jpg)
 
 
 nah begitu, fitur nya masih ini
@@ -18,6 +19,9 @@ nah begitu, fitur nya masih ini
 - mata nengok kiri kanan
 - ada tulisan di atasnya
 - Non-blocking animation using `millis()`
+- fitur jam, tanggal dan hari 
+- animasi lebih di permak
+- bisa connect WIFI
 
 
 ## Hardware
@@ -48,13 +52,14 @@ nah begitu, fitur nya masih ini
 
 1. Clone this repository.
 2. Open the project using VS Code with PlatformIO.
-3. Connect the ESP32.
-4. Build and upload the firmware.
+3. Modif wifi setting nya di /text-to-oled/src/main.cpp, ctrl + f -> "const char* WIFI_SSID" -> modif aja 
+4. Connect the ESP32.
+5. Build and upload the firmware.
 
 
 
 ## Diagram wire
-- diagram: https://wokwi.com/projects/477842258090558465
+- newest diagram: https://wokwi.com/projects/477842258090558465
 
 ![IOT 1](/img/diag1.png)
 - jadi disini aku pakai jumper wire F to M
@@ -62,3 +67,9 @@ nah begitu, fitur nya masih ini
 - M ku colok ke Breadboard
 - nah posisi colok breadboard juga harus 1 kolom lah
 - misal GND esp32 di 30 A ya GND oled display di 30 (B - E)
+
+**pembaruan**
+ini karna kemarin breadboard nya masih sempit bgt lubangnya, jadi hari ini aku putar putar colok colok pakai male jumper cable
+nah setelah itu esp32 dan olednya bisa masuk ke lubang yg di longgarkan tadi, akhirnya cuman pakai 4 cable jumper skrg jadi hemat
+
+![IOT 1](/img/diag1.2.png)
