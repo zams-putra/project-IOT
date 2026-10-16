@@ -11,6 +11,8 @@
 #include <Adafruit_SSD1306.h>
 #include <secret.h>
 
+#include "video_frame.h"
+
 // ---------- OLED ----------
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
@@ -25,41 +27,41 @@ const long GMT_OFFSET_SEC = 7 * 3600;
 const char* NTP_SERVER_1 = "pool.ntp.org";
 const char* NTP_SERVER_2 = "time.google.com";
 
-// ---------- Cuaca (Open-Meteo, tanpa API key) ----------
+// ---------- Cuaca ----------
 const char* WEATHER_CITY = "Tulungagung";
 const float WEATHER_LAT = -8.0654f;
 const float WEATHER_LON = 111.9025f;
-const unsigned long WEATHER_INTERVAL = 15UL * 60UL * 1000UL;  // refresh tiap 15 menit
-const unsigned long WEATHER_RETRY = 60UL * 1000UL;            // kalau gagal, coba lagi 1 menit
+const unsigned long WEATHER_INTERVAL = 15UL * 60UL * 1000UL;
+const unsigned long WEATHER_RETRY    = 60UL * 1000UL;
 
-// ---------- Last.fm (now playing dari Spotify yang di-scrobble) ----------
-// Jangan di-push ke GitHub kalau sudah diisi, pindahkan ke secrets.h
+// ---------- Last.fm ----------
+const unsigned long LASTFM_INTERVAL = 20UL * 1000UL;
+const unsigned long LASTFM_RETRY    = 60UL * 1000UL;
 
-const unsigned long LASTFM_INTERVAL = 20UL * 1000UL;  // cek lagu tiap 20 detik
-const unsigned long LASTFM_RETRY = 60UL * 1000UL;
-
-// ---------- MAC override untuk chip eFuse kosong ----------
+// ---------- MAC override ----------
 uint8_t CUSTOM_MAC[6] = {0x02, 0xAA, 0xBB, 0xCC, 0xDD, 0x01};
 
 // ---------- Timing ----------
-const unsigned long FACE_DURATION = 10000;
-const unsigned long CLOCK_DURATION = 6000;
-const unsigned long WEATHER_DURATION = 6000;
-const unsigned long MUSIC_DURATION = 8000;
-const unsigned long FRAME_INTERVAL = 50;
+const unsigned long FACE_DURATION     = 10000;
+const unsigned long CLOCK_DURATION    = 6000;
+const unsigned long WEATHER_DURATION  = 6000;
+const unsigned long MUSIC_DURATION    = 8000;
+const unsigned long VIDEO_DURATION    = 12000;
+const unsigned long FRAME_INTERVAL    = 50;
 const unsigned long OLED_CHECK_INTERVAL = 1000;
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
-enum Mode { MODE_FACE, MODE_CLOCK, MODE_WEATHER, MODE_MUSIC };
+enum Mode { MODE_FACE, MODE_CLOCK, MODE_WEATHER, MODE_MUSIC, MODE_VIDEO };
 Mode mode = MODE_FACE;
 unsigned long modeStart = 0;
 unsigned long lastFrame = 0;
 unsigned long lastOledCheck = 0;
+unsigned long lastHeartbeat = 0;
 bool oledOk = false;
 bool ntpStarted = false;
 
-// ---------- Mata ----------
+// ---------- Mood ----------
 enum Mood { MOOD_NORMAL, MOOD_HAPPY, MOOD_SLEEPY, MOOD_HOT };
 Mood mood = MOOD_NORMAL;
 unsigned long moodUntil = 0;
@@ -73,7 +75,7 @@ unsigned long nextBlink = 0;
 unsigned long blinkStart = 0;
 bool blinking = false;
 
-// ---------- Data cuaca ----------
+// ---------- Cuaca ----------
 enum WeatherKind { W_CLEAR, W_PARTLY, W_CLOUD, W_FOG, W_RAIN, W_STORM, W_SNOW };
 
 struct WeatherData {
@@ -86,7 +88,7 @@ struct WeatherData {
 WeatherData weather;
 unsigned long nextWeatherFetch = 0;
 
-// ---------- Data lagu ----------
+// ---------- Lagu ----------
 struct TrackData {
     bool playing = false;
     char title[64] = "";
@@ -95,9 +97,9 @@ struct TrackData {
 TrackData track;
 unsigned long nextLastfmFetch = 0;
 
-const char* DAY_NAMES[] = {"Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"};
-const char* MONTH_NAMES[] = {"Jan", "Feb", "Mar", "Apr", "Mei", "Jun",
-                             "Jul", "Agu", "Sep", "Okt", "Nov", "Des"};
+const char* DAY_NAMES[]   = {"Min","Sen","Sel","Rab","Kam","Jum","Sab"};
+const char* MONTH_NAMES[] = {"Jan","Feb","Mar","Apr","Mei","Jun",
+                             "Jul","Agu","Sep","Okt","Nov","Des"};
 
 // ---------- Helpers ----------
 bool oledPresent() {
@@ -105,8 +107,28 @@ bool oledPresent() {
     return Wire.endTransmission() == 0;
 }
 
+// Satu-satunya tempat yang boleh mengubah contrast OLED.
+// Kalau statusnya sama, tidak dikirim ulang (hemat I2C + cegah glitch).
+void oledContrast(uint8_t c) {
+    Wire.beginTransmission(OLED_ADDRESS);
+    Wire.write(0x00);   // control byte: command stream
+    Wire.write(0x81);   // SETCONTRAST
+    Wire.write(c);
+    Wire.endTransmission();
+}
+
+// Ganti definisi applyDim yang lama dengan ini:
+void applyDim(bool want) {
+    if (want == dimmed) return;
+    dimmed = want;
+    uint8_t c = want ? 0x30 : 0xFF;   // 0x30 = redup tapi jelas (dulu 0x10 = terlalu gelap)
+    oledContrast(c);
+    Serial.printf("[Dim] set -> %d (contrast=0x%02X)\n", want, c);
+}
+
 bool initOled() {
     if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS, true, false)) return false;
+    display.dim(false);        // paksa contrast balik ke max
     display.clearDisplay();
     display.display();
     dimmed = false;
@@ -127,7 +149,7 @@ void printCentered(const char* text, int y) {
     display.print(text);
 }
 
-// ---------- Cuaca: fetch ----------
+// ---------- Cuaca: kode ----------
 WeatherKind weatherKind(int code) {
     if (code == 0) return W_CLEAR;
     if (code <= 2) return W_PARTLY;
@@ -163,19 +185,24 @@ bool fetchWeather() {
              WEATHER_LAT, WEATHER_LON);
 
     WiFiClientSecure client;
-    client.setInsecure();  // tanpa verifikasi sertifikat, cukup untuk data cuaca publik
+    client.setInsecure();
     HTTPClient http;
     http.setTimeout(4000);
-    if (!http.begin(client, url)) return false;
+    if (!http.begin(client, url)) {
+        client.stop();
+        return false;
+    }
 
     int httpCode = http.GET();
     if (httpCode != 200) {
         Serial.printf("[Weather] HTTP %d\n", httpCode);
         http.end();
+        client.stop();
         return false;
     }
     String body = http.getString();
     http.end();
+    client.stop();
 
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, body);
@@ -187,12 +214,13 @@ bool fetchWeather() {
     JsonObject cur = doc["current"];
     if (cur.isNull()) return false;
 
-    weather.temp = cur["temperature_2m"] | 0.0f;
+    weather.temp     = cur["temperature_2m"] | 0.0f;
     weather.humidity = cur["relative_humidity_2m"] | 0;
-    weather.code = cur["weather_code"] | 0;
-    weather.isDay = (cur["is_day"] | 1) == 1;
-    weather.valid = true;
-    Serial.printf("[Weather] %.1fC, %d%%, code=%d\n", weather.temp, weather.humidity, weather.code);
+    weather.code     = cur["weather_code"] | 0;
+    weather.isDay    = (cur["is_day"] | 1) == 1;
+    weather.valid    = true;
+    Serial.printf("[Weather] %.1fC, %d%%, code=%d\n",
+                  weather.temp, weather.humidity, weather.code);
     return true;
 }
 
@@ -224,12 +252,10 @@ void drawCloud(int cx, int cy) {
 void drawWeatherIcon(WeatherKind k, bool isDay, int cx, int cy) {
     switch (k) {
         case W_CLEAR:
-            if (isDay) drawSun(cx, cy, 7);
-            else drawMoon(cx, cy);
+            if (isDay) drawSun(cx, cy, 7); else drawMoon(cx, cy);
             break;
         case W_PARTLY:
-            if (isDay) drawSun(cx + 6, cy - 7, 5);
-            else drawMoon(cx + 6, cy - 7);
+            if (isDay) drawSun(cx + 6, cy - 7, 5); else drawMoon(cx + 6, cy - 7);
             drawCloud(cx - 2, cy + 4);
             break;
         case W_CLOUD:
@@ -263,6 +289,8 @@ void drawWeatherIcon(WeatherKind k, bool isDay, int cx, int cy) {
 }
 
 void drawWeather() {
+    applyDim(false);   // mode selain FACE selalu terang
+
     display.clearDisplay();
     display.setTextColor(SSD1306_WHITE);
     display.setTextSize(1);
@@ -288,7 +316,7 @@ void drawWeather() {
     display.setCursor(52, 16);
     display.print(buf);
     int tx = 52 + (int)strlen(buf) * 18 + 3;
-    display.drawCircle(tx, 19, 2, SSD1306_WHITE);  // simbol derajat
+    display.drawCircle(tx, 19, 2, SSD1306_WHITE);
     display.setTextSize(2);
     display.setCursor(tx + 6, 16);
     display.print("C");
@@ -302,8 +330,7 @@ void drawWeather() {
     display.display();
 }
 
-// ---------- Last.fm: fetch ----------
-// Font bawaan GFX cuma ASCII, jadi karakter lain (kanji, emoji, aksen) dibuang
+// ---------- Last.fm ----------
 void sanitizeAscii(const char* in, char* out, size_t outSize) {
     size_t j = 0;
     for (size_t i = 0; in[i] && j < outSize - 1; i++) {
@@ -326,16 +353,21 @@ bool fetchLastfm() {
     client.setInsecure();
     HTTPClient http;
     http.setTimeout(4000);
-    if (!http.begin(client, url)) return false;
+    if (!http.begin(client, url)) {
+        client.stop();
+        return false;
+    }
 
     int httpCode = http.GET();
     if (httpCode != 200) {
         Serial.printf("[Lastfm] HTTP %d\n", httpCode);
         http.end();
+        client.stop();
         return false;
     }
     String body = http.getString();
     http.end();
+    client.stop();
 
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, body);
@@ -344,7 +376,6 @@ bool fetchLastfm() {
         return false;
     }
 
-    // "track" biasanya array, tapi jaga-jaga kalau berupa object tunggal
     JsonVariant raw = doc["recenttracks"]["track"];
     JsonObject obj = raw.is<JsonArray>() ? raw[0].as<JsonObject>() : raw.as<JsonObject>();
     if (obj.isNull()) {
@@ -365,8 +396,7 @@ bool fetchLastfm() {
     return true;
 }
 
-// ---------- Musik: layar ----------
-// Teks lebih lebar dari layar akan berjalan (marquee)
+// ---------- Musik ----------
 void drawScrollText(const char* s, int y, int size, unsigned long now) {
     int cw = 6 * size;
     int w = (int)strlen(s) * cw;
@@ -391,6 +421,8 @@ void drawNote(int x, int y) {
 }
 
 void drawMusic(unsigned long now) {
+    applyDim(false);
+
     static float bars[16];
     static unsigned long lastBars = 0;
 
@@ -413,7 +445,6 @@ void drawMusic(unsigned long now) {
     drawScrollText(track.title, 16, 2, now);
     drawScrollText(track.artist, 36, 1, now);
 
-    // equalizer palsu: cuma hiasan, bukan baca audio asli
     if (now - lastBars >= 90) {
         lastBars = now;
         for (int i = 0; i < 16; i++) {
@@ -430,6 +461,33 @@ void drawMusic(unsigned long now) {
     display.display();
 }
 
+// ---------- Video Frame ----------
+void drawVideo(unsigned long now) {
+    applyDim(false);   // video selalu terang
+
+    static int frameIdx = 0;
+    static unsigned long lastFrameChange = 0;
+    static bool reported = false;
+
+    if (!reported) {
+        reported = true;
+        Serial.printf("[Video] enter, TOTAL=%d DELAY=%d\n", TOTAL_FRAMES, FRAME_DELAY);
+    }
+
+    if (now - lastFrameChange >= FRAME_DELAY) {
+        lastFrameChange = now;
+        frameIdx++;
+        if (frameIdx >= TOTAL_FRAMES) frameIdx = 0;
+    }
+
+    display.clearDisplay();
+    display.drawBitmap(0, 0,
+                       &video_frames[frameIdx][0],
+                       128, 64,
+                       SSD1306_WHITE);
+    display.display();
+}
+
 // ---------- Face ----------
 void updateMood(unsigned long now) {
     struct tm t;
@@ -440,7 +498,7 @@ void updateMood(unsigned long now) {
     } else if (weather.valid && weather.temp >= 33.0f) {
         mood = MOOD_HOT;
     } else if (mood == MOOD_HAPPY && now < moodUntil) {
-        // tetap happy sampai waktunya habis
+        // tetap happy
     } else if (now >= nextHappy) {
         mood = MOOD_HAPPY;
         moodUntil = now + random(2500, 4000);
@@ -449,11 +507,8 @@ void updateMood(unsigned long now) {
         mood = MOOD_NORMAL;
     }
 
-    bool wantDim = (mood == MOOD_SLEEPY);
-    if (wantDim != dimmed) {
-        display.dim(wantDim);
-        dimmed = wantDim;
-    }
+    // HANYA di FACE, dim tergantung mood. Mode lain terang.
+    applyDim(mood == MOOD_SLEEPY);
 }
 
 int updateEyes(unsigned long now) {
@@ -482,11 +537,36 @@ int updateEyes(unsigned long now) {
     return fullHeight - (int)(closed * (fullHeight - 2));
 }
 
+// Helper: gambar satu mata mengantuk (slit horizontal dengan ujung luar turun)
+void drawSleepyEye(int cx, int cy) {
+    // Slit mata (garis tebal membulat)
+    display.fillRoundRect(cx - 13, cy - 2, 26, 5, 2, SSD1306_WHITE);
+    // Kelopak atas: garis pendek di atas slit (kesan berat)
+    for (int i = -2; i <= 2; i++) {
+        int x = cx + i * 5;
+        display.drawFastHLine(x, cy - 6, 3, SSD1306_WHITE);
+    }
+    // Kantung mata: garis lembut di bawah
+    display.drawFastHLine(cx - 11, cy + 6, 22, SSD1306_WHITE);
+}
+
+// Helper: gambar "Zz" melayang naik-turun
+void drawSleepingZz(unsigned long now) {
+    int tick = (now / 350) % 4;         // 0..3
+    int dy   = tick * 2;                 // 0,2,4,6 px naik
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(112, 18 + (6 - dy));      display.print("z");
+    display.setCursor(106, 14 + (6 - dy));      display.print("Z");
+    display.setCursor(100, 10 + (6 - dy));      display.print("Z");
+}
+
 void drawFace(unsigned long now) {
     updateMood(now);
     int h = updateEyes(now);
-    if (mood == MOOD_SLEEPY && h > 10) h = 10;
+    // MOOD_HOT tetap pakai mekanisme lama
     if (mood == MOOD_HOT && h > 16) h = 16;
+    // MOOD_SLEEPY tidak lagi pakai h, punya gambar sendiri
 
     display.clearDisplay();
     display.setTextSize(1);
@@ -495,26 +575,38 @@ void drawFace(unsigned long now) {
     display.drawFastHLine(0, 12, SCREEN_WIDTH, SSD1306_WHITE);
 
     const int cy = 36, leftX = 40, rightX = 88, w = 28;
-    int r = h / 2 < 8 ? h / 2 : 8;
-    display.fillRoundRect(leftX - w / 2, cy - h / 2, w, h, r, SSD1306_WHITE);
-    display.fillRoundRect(rightX - w / 2, cy - h / 2, w, h, r, SSD1306_WHITE);
-
-    if (mood == MOOD_HAPPY && h > 14) {
-        // potong bagian bawah mata jadi lengkung "^ ^"
-        display.fillCircle(leftX, cy + 14, 12, SSD1306_BLACK);
-        display.fillCircle(rightX, cy + 14, 12, SSD1306_BLACK);
-    } else if (h > 14) {
-        int px = (int)roundf(pupilX);
-        int py = (int)roundf(pupilY);
-        display.fillCircle(leftX + px, cy + py, 5, SSD1306_BLACK);
-        display.fillCircle(rightX + px, cy + py, 5, SSD1306_BLACK);
-    }
 
     if (mood == MOOD_SLEEPY) {
-        display.setCursor(106, 16);
-        display.print("Zz");
+        // ============ WAJAH MENGANTUK ============
+        drawSleepyEye(leftX,  cy);
+        drawSleepyEye(rightX, cy);
+
+        // Mulut menguap kecil (oval)
+        int mx = SCREEN_WIDTH / 2;
+        display.fillRoundRect(mx - 4, cy + 12, 8, 6, 3, SSD1306_WHITE);
+        display.fillRoundRect(mx - 2, cy + 13, 4, 4, 2, SSD1306_BLACK);
+
+        // Zz melayang
+        drawSleepingZz(now);
+
+    } else {
+        // ============ WAJAH NORMAL / HAPPY / HOT ============
+        int r = h / 2 < 8 ? h / 2 : 8;
+        display.fillRoundRect(leftX  - w / 2, cy - h / 2, w, h, r, SSD1306_WHITE);
+        display.fillRoundRect(rightX - w / 2, cy - h / 2, w, h, r, SSD1306_WHITE);
+
+        if (mood == MOOD_HAPPY && h > 14) {
+            display.fillCircle(leftX,  cy + 14, 12, SSD1306_BLACK);
+            display.fillCircle(rightX, cy + 14, 12, SSD1306_BLACK);
+        } else if (h > 14) {
+            int px = (int)roundf(pupilX);
+            int py = (int)roundf(pupilY);
+            display.fillCircle(leftX  + px, cy + py, 5, SSD1306_BLACK);
+            display.fillCircle(rightX + px, cy + py, 5, SSD1306_BLACK);
+        }
     }
 
+    // Jam di bawah (selalu ada)
     struct tm t;
     if (getTime(t)) {
         char buf[8];
@@ -524,8 +616,11 @@ void drawFace(unsigned long now) {
     display.display();
 }
 
+
 // ---------- Clock ----------
 void drawClock() {
+    applyDim(false);
+
     struct tm t;
     display.clearDisplay();
     display.setTextColor(SSD1306_WHITE);
@@ -567,6 +662,7 @@ unsigned long modeDuration(Mode m) {
         case MODE_CLOCK:   return CLOCK_DURATION;
         case MODE_WEATHER: return WEATHER_DURATION;
         case MODE_MUSIC:   return MUSIC_DURATION;
+        case MODE_VIDEO:   return VIDEO_DURATION;
     }
     return FACE_DURATION;
 }
@@ -579,13 +675,17 @@ Mode nextMode(Mode m) {
             if (timeOk) return MODE_CLOCK;
             if (weather.valid) return MODE_WEATHER;
             if (track.playing) return MODE_MUSIC;
-            return MODE_FACE;
+            return MODE_VIDEO;
         case MODE_CLOCK:
             if (weather.valid) return MODE_WEATHER;
-            return track.playing ? MODE_MUSIC : MODE_FACE;
+            if (track.playing) return MODE_MUSIC;
+            return MODE_VIDEO;
         case MODE_WEATHER:
-            return track.playing ? MODE_MUSIC : MODE_FACE;
+            if (track.playing) return MODE_MUSIC;
+            return MODE_VIDEO;
         case MODE_MUSIC:
+            return MODE_VIDEO;
+        case MODE_VIDEO:
             return MODE_FACE;
     }
     return MODE_FACE;
@@ -597,9 +697,15 @@ void setup() {
     delay(1500);
     randomSeed(esp_random());
 
-    Wire.begin(OLED_SDA, OLED_SCL);
+    // Reset reason — buat tahu kenapa boot: power-on, crash, brownout, dll.
+    esp_reset_reason_t rr = esp_reset_reason();
+    Serial.printf("[BOOT] reset_reason=%d heap=%u\n", (int)rr, ESP.getFreeHeap());
+    // 1=POWERON  3=SW  4=PANIC  5/6=WDT  8=BROWNOUT
 
-    // ---- Cek MAC asli ----
+    Wire.begin(OLED_SDA, OLED_SCL);
+    Wire.setTimeOut(50);   // cegah hang di bus I2C
+
+    // ---- MAC ----
     uint8_t base[6];
     esp_err_t macErr = esp_base_mac_addr_get(base);
 
@@ -613,7 +719,7 @@ void setup() {
         if (setErr == ESP_OK) {
             Serial.printf("[MAC] Override OK -> %s\n", WiFi.macAddress().c_str());
         } else {
-            Serial.printf("[MAC] Override FAIL err=%d, WiFi dimatikan\n", (int)setErr);
+            Serial.printf("[MAC] Override FAIL err=%d\n", (int)setErr);
         }
     } else {
         Serial.printf("[MAC] Valid: %s\n", WiFi.macAddress().c_str());
@@ -636,24 +742,34 @@ void setup() {
 void loop() {
     unsigned long now = millis();
 
+    // ---- Heartbeat tiap 5 detik: tahu ESP32 masih hidup atau tidak ----
+    if (now - lastHeartbeat >= 5000) {
+        lastHeartbeat = now;
+        Serial.printf("[HB] t=%lus heap=%u mode=%d oledOk=%d dim=%d\n",
+                      now / 1000, ESP.getFreeHeap(),
+                      (int)mode, oledOk, dimmed);
+    }
+
+    // ---- NTP ----
     if (!ntpStarted && WiFi.status() == WL_CONNECTED) {
         configTime(GMT_OFFSET_SEC, 0, NTP_SERVER_1, NTP_SERVER_2);
         ntpStarted = true;
         Serial.printf("[NTP] started, IP=%s\n", WiFi.localIP().toString().c_str());
     }
 
-    // Ambil cuaca (skip saat layar cuaca tampil supaya animasi tidak tersendat)
+    // ---- Fetch cuaca (skip saat layar cuaca) ----
     if (WiFi.status() == WL_CONNECTED && now >= nextWeatherFetch && mode != MODE_WEATHER) {
         bool ok = fetchWeather();
         nextWeatherFetch = millis() + (ok ? WEATHER_INTERVAL : WEATHER_RETRY);
     }
 
-    // Cek lagu (skip saat layar musik tampil supaya teks berjalan tidak tersendat)
+    // ---- Fetch lagu (skip saat layar musik) ----
     if (WiFi.status() == WL_CONNECTED && now >= nextLastfmFetch && mode != MODE_MUSIC) {
         bool ok = fetchLastfm();
         nextLastfmFetch = millis() + (ok ? LASTFM_INTERVAL : LASTFM_RETRY);
     }
 
+    // ---- Cek OLED ----
     if (now - lastOledCheck >= OLED_CHECK_INTERVAL) {
         lastOledCheck = now;
         bool present = oledPresent();
@@ -668,11 +784,16 @@ void loop() {
 
     if (!oledOk) { delay(10); return; }
 
+    // ---- Ganti mode ----
     if (now - modeStart >= modeDuration(mode)) {
         mode = nextMode(mode);
         modeStart = now;
+        Serial.printf("[Mode] -> %d\n", (int)mode);
+        // Reset dim ke terang; FACE akan set ulang sesuai mood.
+        applyDim(false);
     }
 
+    // ---- Render ----
     if (now - lastFrame >= FRAME_INTERVAL) {
         lastFrame = now;
         switch (mode) {
@@ -680,6 +801,7 @@ void loop() {
             case MODE_CLOCK:   drawClock();   break;
             case MODE_WEATHER: drawWeather(); break;
             case MODE_MUSIC:   drawMusic(now); break;
+            case MODE_VIDEO:   drawVideo(now); break;
         }
     }
 }

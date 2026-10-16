@@ -40,6 +40,7 @@ static const char* LASTFM_API_KEY = "[last-fm-API]";
 - done tinggal lanjut aja build upload firmware nya
 ```
 - bisa nampilin cuaca
+- bisa nampilin cuplikan video di oled display
 
 
 ## Hardware
