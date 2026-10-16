@@ -3,7 +3,7 @@
 mostly disini code arduino nya i mean code .cpp nya itu AI generated, aku juga belum terlalu jago ngoding IOT ini, jadi sekalian belajar lah
 also aku bakal ngasih juga skema wire nya nanti 
 
-# ESP32 Text to Oled (awalan Desk Buddy)
+# ESP32 Text to Oled | Desk Buddy
 
 jadi ini sejenis kayak ..... ya begini lah liat coba
 This project is built from scratch using C++ and the Arduino framework with PlatformIO.
@@ -91,3 +91,59 @@ ini karna kemarin breadboard nya masih sempit bgt lubangnya, jadi hari ini aku p
 nah setelah itu esp32 dan olednya bisa masuk ke lubang yg di longgarkan tadi, akhirnya cuman pakai 4 cable jumper skrg jadi hemat
 
 ![IOT 1](/img/diag1.2.png)
+
+
+---
+
+# ESP32 Servo Movement
+
+jadi ini sejenis kayak palang pintu ajah sih, buat nyoba servo di esp32
+
+This project is built from scratch using C++ and the Arduino framework with PlatformIO.
+
+
+![IOT 1](/img/iot2.jpg)
+
+
+nah begitu, fitur nya masih ini
+- gerakin servo 180deg, disini sih aku 90deg aja kira kira
+- connect ke web, jadi palang pintu geraknya dari tombol di webnya
+
+
+## Hardware
+
+- ESP32 DevKit V1 (ESP-WROOM-32)
+- servo sg90
+- Jumper wires
+- sumpit kayu (bukan hardware)
+- solasi (bukan hardware)
+
+## Wiring
+
+| Servo | ESP32 |
+|---|---|
+| Coklat / hitam (GND) | GND |
+| Merah (5V) | 5V / VN samping GND satunya 3v3 |
+| Oranye / kuning (signal) | GPIO 13 |
+
+## Software
+
+- C++
+- Arduino Framework
+- PlatformIO
+- ESP32Servo 
+
+## Getting Started
+
+1. Clone this repository.
+2. Open the project using VS Code with PlatformIO.
+3. Modif wifi setting nya di /servo-movement/src/main.cpp, ctrl + f -> "const char* WIFI_SSID" -> modif aja bisa modif deg juga speed juga dan lain lain lah
+4. Connect the ESP32.
+5. Build and upload the firmware.
+
+
+
+## Diagram wire
+- newest diagram: https://wokwi.com/projects/478020244861931521
+
+![IOT 1](/img/diag2.png)
