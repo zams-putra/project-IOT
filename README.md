@@ -115,7 +115,7 @@ nah begitu, fitur nya masih ini
 
 - ESP32 DevKit V1 (ESP-WROOM-32)
 - servo sg90
-- Jumper wires
+- Jumper wires (M to M)
 - sumpit kayu (bukan hardware)
 - solasi (bukan hardware)
 
@@ -148,3 +148,95 @@ nah begitu, fitur nya masih ini
 - newest diagram: https://wokwi.com/projects/478020244861931521
 
 ![IOT 1](/img/diag2.png)
+
+
+
+---
+
+# DISCLAIMER
+## Please keep in mind, if you use this tool it will be your own risk. Its just strictly for education purposes and should'nt used for any illegal or unethical activities. 
+## Jamming is illegal, im not responsible your action
+
+intinya ini ilegal bgt cuy, dan lu harus tanggung jawab sendiri sama kelakuan lu nanti 
+
+contoh 
+- lu bisa hilangin nyawa orang kalau lu salah gunain tools ini di lokasi2 tertentu
+- lu juga bisa merugikan orang lain di beberapa aspek bisnis
+
+
+# ESP32 Anti Horeg - BlueJammer
+
+
+
+jadi ini sejenis tools buat bikin noise
+- mouse wireless ku jadi melamban
+- headset bluetooth ku jadi patah patah music nya 
+- wifi ku juga jadi hilang jaringannya sementara
+- packet loss tinggi lah intinya
+
+
+This project is built from scratch using C++ and the Arduino framework with PlatformIO.
+
+
+![IOT 1](/img/iot3.jpg)
+
+
+nah begitu, fitur nya yaaa yang tadi 
+- belum ada fitur apa2 ga integrasi oled layar atau apapun 
+- sekali colok efeknya bekerja
+
+
+## Hardware
+
+- ESP32 DevKit V1 (ESP-WROOM-32)
+- NRF24L01 + PA + LNA + Antenna
+- Jumper wires
+
+## Wiring
+
+### Radio A (HSPI)
+
+| nRF24L01 | ESP32 |
+|---|---|
+| GND | GND |
+| VCC | 3V3 |
+| CE | GPIO 16 |
+| CSN | GPIO 15 |
+| SCK | GPIO 14 |
+| MOSI | GPIO 13 |
+| MISO | GPIO 12 |
+| IRQ | Tidak disambung |
+
+### Radio B (VSPI)
+
+| nRF24L01 | ESP32 |
+|---|---|
+| GND | GND |
+| VCC | 3V3 |
+| CE | GPIO 22 |
+| CSN | GPIO 21 |
+| SCK | GPIO 18 |
+| MOSI | GPIO 23 |
+| MISO | GPIO 19 |
+| IRQ | Tidak disambung |
+
+## Software
+
+- C++
+- Arduino Framework
+- PlatformIO
+- nrf24/RF24 @ ^1.4.11 
+
+## Getting Started
+
+1. Clone this repository.
+2. Open the project using VS Code with PlatformIO.
+3. Connect the ESP32.
+4. Build and upload the firmware.
+
+
+
+## Diagram wire
+- di wokwi ga ada nrf sih yauda pake wiring di atas atau ga pake foto ini aja
+
+![IOT 1](/img/diag3.jpg)
